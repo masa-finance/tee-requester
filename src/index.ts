@@ -113,6 +113,94 @@ function countTweetsInResult(result: any): number {
 }
 
 /**
+ * Extract and format tweet information for logging
+ */
+function extractTweetInfo(result: any): any[] {
+  const tweets: any[] = [];
+
+  if (!result) return tweets;
+
+  try {
+    // Handle different possible result structures
+    let tweetArray: any[] = [];
+
+    if (Array.isArray(result)) {
+      tweetArray = result;
+    } else if (result.data && Array.isArray(result.data)) {
+      tweetArray = result.data;
+    } else if (result.tweets && Array.isArray(result.tweets)) {
+      tweetArray = result.tweets;
+    } else if (typeof result === "object") {
+      // Try to find an array in the result
+      for (const key in result) {
+        if (Array.isArray(result[key])) {
+          tweetArray = result[key];
+          break;
+        }
+      }
+    }
+
+    // Extract relevant information from each tweet
+    tweetArray.forEach((tweet: any) => {
+      const tweetInfo: any = {
+        id: tweet.id || "Unknown ID",
+      };
+
+      // Extract text content
+      if (tweet.text) {
+        tweetInfo.text = tweet.text.substring(0, 80) + (tweet.text.length > 80 ? "..." : "");
+      } else if (tweet.full_text) {
+        tweetInfo.text =
+          tweet.full_text.substring(0, 80) + (tweet.full_text.length > 80 ? "..." : "");
+      } else if (tweet.content) {
+        tweetInfo.text = tweet.content.substring(0, 80) + (tweet.content.length > 80 ? "..." : "");
+      }
+
+      // Extract author information
+      if (tweet.user) {
+        tweetInfo.author =
+          tweet.user.screen_name || tweet.user.username || tweet.user.name || "Unknown";
+      } else if (tweet.author) {
+        tweetInfo.author =
+          tweet.author.screen_name || tweet.author.username || tweet.author.name || "Unknown";
+      }
+
+      // Extract date
+      if (tweet.created_at) {
+        tweetInfo.date = new Date(tweet.created_at).toISOString().split("T")[0];
+      } else if (tweet.date) {
+        tweetInfo.date = new Date(tweet.date).toISOString().split("T")[0];
+      }
+
+      // Extract engagement metrics if available
+      const metrics: any = {};
+      if (tweet.public_metrics) {
+        metrics.likes = tweet.public_metrics.like_count;
+        metrics.retweets = tweet.public_metrics.retweet_count;
+        metrics.replies = tweet.public_metrics.reply_count;
+      } else {
+        if (tweet.favorite_count || tweet.likes)
+          metrics.likes = tweet.favorite_count || tweet.likes;
+        if (tweet.retweet_count || tweet.retweets)
+          metrics.retweets = tweet.retweet_count || tweet.retweets;
+        if (tweet.reply_count || tweet.replies)
+          metrics.replies = tweet.reply_count || tweet.replies;
+      }
+
+      if (Object.keys(metrics).length > 0) {
+        tweetInfo.metrics = metrics;
+      }
+
+      tweets.push(tweetInfo);
+    });
+  } catch (e) {
+    console.error("Error extracting tweet info:", e);
+  }
+
+  return tweets;
+}
+
+/**
  * Generate a report for the current run
  */
 function generateRunReport(results: { [key: string]: JobResponse }, query: string): void {
@@ -123,6 +211,7 @@ function generateRunReport(results: { [key: string]: JobResponse }, query: strin
   let successCount = 0;
   let failureCount = 0;
   let tweetsInThisRun = 0;
+  const allTweets: { worker: string; tweets: any[] }[] = [];
 
   for (const [workerUrl, result] of Object.entries(results)) {
     const workerName = workerUrl.replace(/^https?:\/\//, "").split(".")[0];
@@ -133,6 +222,15 @@ function generateRunReport(results: { [key: string]: JobResponse }, query: strin
       tweetsInThisRun += tweetCount;
       successCount++;
       console.log(`✅ Worker ${workerName}: ${tweetCount} tweets`);
+
+      // Extract tweet information
+      const tweetInfo = extractTweetInfo(result.result);
+      if (tweetInfo.length > 0) {
+        allTweets.push({
+          worker: workerName,
+          tweets: tweetInfo,
+        });
+      }
     } else {
       failureCount++;
       console.log(`❌ Worker ${workerName}: Failed - ${result.error || "Unknown error"}`);
@@ -146,7 +244,37 @@ function generateRunReport(results: { [key: string]: JobResponse }, query: strin
   console.log(`Workers Summary: ${successCount} succeeded, ${failureCount} failed`);
   console.log(`Tweets in this run: ${tweetsInThisRun}`);
   console.log(`Total tweets scraped: ${totalTweetCount}`);
-  console.log("---------------------------------------------\n");
+  console.log("---------------------------------------------");
+
+  // Log tweet information if available
+  if (allTweets.length > 0) {
+    console.log("\n🔍 TWEET DETAILS:");
+    console.log("---------------------------------------------");
+
+    allTweets.forEach(({ worker, tweets }) => {
+      console.log(`\nTweets from worker [${worker}]:`);
+
+      tweets.forEach((tweet, idx) => {
+        console.log(`\n${idx + 1}. ${tweet.id}`);
+        if (tweet.author) console.log(`   Author: @${tweet.author}`);
+        if (tweet.date) console.log(`   Date: ${tweet.date}`);
+        if (tweet.text) console.log(`   Text: ${tweet.text}`);
+
+        if (tweet.metrics) {
+          const metrics = [];
+          if (tweet.metrics.likes !== undefined) metrics.push(`❤️ ${tweet.metrics.likes}`);
+          if (tweet.metrics.retweets !== undefined) metrics.push(`🔄 ${tweet.metrics.retweets}`);
+          if (tweet.metrics.replies !== undefined) metrics.push(`💬 ${tweet.metrics.replies}`);
+
+          if (metrics.length > 0) {
+            console.log(`   Engagement: ${metrics.join(" | ")}`);
+          }
+        }
+      });
+    });
+
+    console.log("\n---------------------------------------------\n");
+  }
 }
 
 /**
