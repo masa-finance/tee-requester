@@ -178,7 +178,7 @@ function generateRunReport(results: { [key: string]: JobResponse }, query: strin
   const allTweets: { worker: string; tweets: any[] }[] = [];
 
   for (const [workerUrl, result] of Object.entries(results)) {
-    const workerName = workerUrl.replace("https://", "").split(".")[0];
+    const workerName = workerUrl.replace("https://", "");
 
     if (result.success && result.result) {
       // Use the tweetCount from metadata if available, otherwise count manually
@@ -212,18 +212,21 @@ function generateRunReport(results: { [key: string]: JobResponse }, query: strin
 
   // Log tweet information if available
   if (allTweets.length > 0) {
-    console.log("\n🔍 TWEET CONTENTS:");
+    console.log("\n📝 TWEET CONTENTS:");
     console.log("---------------------------------------------");
 
     allTweets.forEach(({ worker, tweets }) => {
-      console.log(`\nTweets from worker [${worker}]:`);
+      console.log(`\nTweets from ${worker}:`);
 
       tweets.forEach((tweet, idx) => {
-        console.log(`\n${idx + 1}. ${tweet.text}`);
+        // Only display the text content, with a simple numbered format
+        console.log(`${idx + 1}. ${tweet.text}`);
       });
     });
 
     console.log("\n---------------------------------------------\n");
+  } else {
+    console.log("\nNo tweet content available to display.\n");
   }
 }
 
