@@ -14,6 +14,8 @@ export interface JobResponse {
   metadata: {
     query?: string;
     maxResults?: number;
+    workerUrl?: string;
+    tweetCount?: number;
     timing: {
       executedAt: string;
       responseTimeMs?: number;
@@ -161,6 +163,35 @@ export class TeeClient {
   }
 
   /**
+   * Count tweets in a result object
+   */
+  private countTweets(result: any): number {
+    if (!result) return 0;
+
+    try {
+      // Handle different possible result structures
+      if (Array.isArray(result)) {
+        return result.length;
+      } else if (result.data && Array.isArray(result.data)) {
+        return result.data.length;
+      } else if (result.tweets && Array.isArray(result.tweets)) {
+        return result.tweets.length;
+      } else if (typeof result === "object") {
+        // Try to find an array in the result
+        for (const key in result) {
+          if (Array.isArray(result[key])) {
+            return result[key].length;
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Error counting tweets:", e);
+    }
+
+    return 0;
+  }
+
+  /**
    * Execute a complete telemetry sequence
    */
   async executeTelemetrySequence(
@@ -288,12 +319,17 @@ export class TeeClient {
         }
       }
 
+      // Count tweets in the result
+      const tweetCount = this.countTweets(result);
+
       return {
         success: true,
         result,
         metadata: {
           query,
           maxResults,
+          workerUrl: this.teeWorkerAddress,
+          tweetCount,
           timing: {
             executedAt: new Date().toISOString(),
           },
@@ -307,6 +343,8 @@ export class TeeClient {
         metadata: {
           query,
           maxResults,
+          workerUrl: this.teeWorkerAddress,
+          tweetCount: 0,
           timing: {
             executedAt: new Date().toISOString(),
           },
