@@ -8,7 +8,7 @@ require github.com/masa-finance/tee-worker v1.0.0
 
 require (
 	github.com/edgelesssys/ego v1.5.4 // indirect
-	github.com/go-jose/go-jose/v4 v4.0.4 // indirect
+	github.com/go-jose/go-jose/v4 v4.0.5 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	golang.org/x/crypto v0.36.0 // indirect
