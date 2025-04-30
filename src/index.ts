@@ -124,14 +124,24 @@ function extractTweetInfo(result: any): any[] {
     // Handle different possible result structures
     let tweetArray: any[] = [];
 
+    // Case 1: Direct array of tweets
     if (Array.isArray(result)) {
       tweetArray = result;
-    } else if (result.data && Array.isArray(result.data)) {
+    }
+    // Case 2: Object with data array
+    else if (result.data && Array.isArray(result.data)) {
       tweetArray = result.data;
-    } else if (result.tweets && Array.isArray(result.tweets)) {
+    }
+    // Case 3: Object with tweets array
+    else if (result.tweets && Array.isArray(result.tweets)) {
       tweetArray = result.tweets;
-    } else if (typeof result === "object") {
-      // Try to find an array in the result
+    }
+    // Case: 4: Object with statuses array (Twitter API format)
+    else if (result.statuses && Array.isArray(result.statuses)) {
+      tweetArray = result.statuses;
+    }
+    // Case 5: Search for any array in the result object
+    else if (typeof result === "object") {
       for (const key in result) {
         if (Array.isArray(result[key])) {
           tweetArray = result[key];
@@ -143,6 +153,16 @@ function extractTweetInfo(result: any): any[] {
     // Extract relevant information from each tweet
     tweetArray.forEach((tweet: any) => {
       let text = null;
+      let id = null;
+
+      // Extract tweet ID
+      if (tweet.id) {
+        id = tweet.id;
+      } else if (tweet.id_str) {
+        id = tweet.id_str;
+      } else if (tweet.tweet_id) {
+        id = tweet.tweet_id;
+      }
 
       // Extract text content
       if (tweet.text) {
@@ -151,10 +171,22 @@ function extractTweetInfo(result: any): any[] {
         text = tweet.full_text;
       } else if (tweet.content) {
         text = tweet.content;
+      } else if (tweet.message) {
+        text = tweet.message;
+      } else if (tweet.body) {
+        text = tweet.body;
+      } else if (tweet.caption) {
+        text = tweet.caption;
+      } else if (typeof tweet === "string") {
+        // The tweet itself could be just a string
+        text = tweet;
       }
 
       if (text) {
-        tweets.push({ text });
+        tweets.push({
+          id: id || "Unknown ID",
+          text: text,
+        });
       }
     });
   } catch (e) {
@@ -209,25 +241,6 @@ function generateRunReport(results: { [key: string]: JobResponse }, query: strin
   console.log(`Tweets in this run: ${tweetsInThisRun}`);
   console.log(`Total tweets scraped: ${totalTweetCount}`);
   console.log("---------------------------------------------");
-
-  // Log tweet information if available
-  if (allTweets.length > 0) {
-    console.log("\n📝 TWEET CONTENTS:");
-    console.log("---------------------------------------------");
-
-    allTweets.forEach(({ worker, tweets }) => {
-      console.log(`\nTweets from ${worker}:`);
-
-      tweets.forEach((tweet, idx) => {
-        // Only display the text content, with a simple numbered format
-        console.log(`${idx + 1}. ${tweet.text}`);
-      });
-    });
-
-    console.log("\n---------------------------------------------\n");
-  } else {
-    console.log("\nNo tweet content available to display.\n");
-  }
 }
 
 /**
@@ -260,6 +273,39 @@ async function executeRun(): Promise<void> {
       // Log individual results
       if (result.value.success && result.value.result) {
         console.log(`\n✅ Twitter search completed successfully for ${workerUrl}!`);
+
+        // Diagnostic log to see the structure of the result
+        console.log("\n🔍 DEBUG - Raw Result Structure:");
+        console.log("---------------------------------------------");
+        console.log("Result type:", typeof result.value.result);
+        if (Array.isArray(result.value.result)) {
+          console.log("Is Array of length:", result.value.result.length);
+          if (result.value.result.length > 0) {
+            console.log("First item keys:", Object.keys(result.value.result[0]));
+            console.log(
+              "Sample first item:",
+              JSON.stringify(result.value.result[0], null, 2).substring(0, 1000) + "..."
+            );
+          }
+        } else if (typeof result.value.result === "object") {
+          console.log("Object keys:", Object.keys(result.value.result));
+          // Look for arrays in the result object
+          for (const key in result.value.result) {
+            if (Array.isArray(result.value.result[key])) {
+              console.log(
+                `Found array in key "${key}" with length:`,
+                result.value.result[key].length
+              );
+              if (result.value.result[key].length > 0) {
+                console.log(
+                  `Sample item from "${key}":`,
+                  JSON.stringify(result.value.result[key][0], null, 2).substring(0, 1000) + "..."
+                );
+              }
+            }
+          }
+        }
+        console.log("---------------------------------------------");
       } else {
         console.error(`\n❌ Twitter search failed for ${workerUrl}:`);
         console.error(`Error: ${result.value.error || "Unknown error"}`);
