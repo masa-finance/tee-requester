@@ -1,0 +1,7 @@
+services:
+  requester:
+    build:
+      context: ./requester
+      dockerfile: Dockerfile
+    env_file: .env
+    # restart: unless-stopped 
