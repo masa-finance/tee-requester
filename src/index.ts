@@ -315,7 +315,7 @@ function generateRunReport(
   console.log(`📊 REPORT: Twitter Search Results`);
   console.log(`Query: "${query}"`);
   console.log(`Max Results: ${maxResults}`);
-  console.log(`Cadence: ${cadence} seconds`);
+  console.log(`Wait: ${cadence} seconds`);
   console.log("---------------------------------------------");
 
   let successCount = 0;
@@ -361,31 +361,30 @@ function generateRunReport(
  * Main function with optional repeated execution based on cadence
  */
 async function main(): Promise<void> {
-  // Select a random cadence for this session
+  // Execute first run immediately
+  await runWithRandomCadence();
+}
+
+/**
+ * Schedule and execute a run with a new random cadence
+ */
+async function runWithRandomCadence(): Promise<void> {
+  // Select a random cadence for this run
   const randomCadence = getRandomItem(cadencesList);
-  console.log(`Selected random cadence: ${randomCadence} seconds`);
+  console.log(`Selected random wait time for next run: ${randomCadence} seconds`);
 
   if (randomCadence <= 0) {
-    // Run once and exit
+    // Run once and exit if cadence is 0 or negative
     await executeRun(randomCadence);
     return;
   }
 
-  // Run on a cadence (repeated schedule)
-  console.log(`Running with a cadence of ${randomCadence} seconds`);
-
-  // Execute immediately for the first time
+  // Execute the run
   await executeRun(randomCadence);
 
-  // Set up interval for repeated execution
-  setInterval(async () => {
-    console.log(`\n--- Executing scheduled run (${new Date().toISOString()}) ---\n`);
-    try {
-      await executeRun(randomCadence);
-    } catch (error) {
-      console.error("Error during scheduled run:", error);
-    }
-  }, randomCadence * 1000);
+  // Schedule the next run with a new random cadence
+  console.log(`Next run scheduled in ${randomCadence} seconds`);
+  setTimeout(runWithRandomCadence, randomCadence * 1000);
 }
 
 // Run the main function
