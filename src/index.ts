@@ -12,8 +12,14 @@ const allowSelfSigned = process.env.ALLOW_INSECURE_TLS === "true";
 const twitterQueries = (process.env.TWITTER_QUERIES || "#AI trending")
   .split(",")
   .map((query) => query.trim());
-const maxResults = parseInt(process.env.MAX_RESULTS || "10", 10);
-const cadence = parseInt(process.env.CADENCE || "0", 10); // Seconds between runs, 0 means run once and exit
+const maxResultsList = (process.env.MAX_RESULTS || "10")
+  .split(",")
+  .map((num) => parseInt(num.trim(), 10))
+  .filter((num) => !isNaN(num));
+const cadencesList = (process.env.CADENCES || "60")
+  .split(",")
+  .map((num) => parseInt(num.trim(), 10))
+  .filter((num) => !isNaN(num));
 
 // Tracking total tweets scraped
 let totalTweetCount = 0;
@@ -55,12 +61,13 @@ async function executeWorkerJob(workerUrl: string, query: string): Promise<JobRe
   const client = new TeeClient(workerUrl, allowSelfSigned);
 
   try {
-    console.log(`Executing Twitter search for "${query}" with max results: ${maxResults}`);
+    const randomMaxResults = getRandomItem(maxResultsList);
+    console.log(`Executing Twitter search for "${query}" with max results: ${randomMaxResults}`);
 
     // Execute the Twitter sequence
     const result: JobResponse = await client.executeTwitterSequence(
       query,
-      maxResults,
+      randomMaxResults,
       3, // maxRetries
       2000 // delay between retries (ms)
     );
@@ -73,7 +80,7 @@ async function executeWorkerJob(workerUrl: string, query: string): Promise<JobRe
       error: error instanceof Error ? error.message : String(error),
       metadata: {
         query,
-        maxResults,
+        maxResults: getRandomItem(maxResultsList),
         workerUrl,
         timing: {
           executedAt: new Date().toISOString(),
@@ -197,61 +204,17 @@ function extractTweetInfo(result: any): any[] {
 }
 
 /**
- * Generate a report for the current run
- */
-function generateRunReport(results: { [key: string]: JobResponse }, query: string): void {
-  console.log("\n---------------------------------------------");
-  console.log(`📊 REPORT: Twitter Search Results for "${query}"`);
-  console.log("---------------------------------------------");
-
-  let successCount = 0;
-  let failureCount = 0;
-  let tweetsInThisRun = 0;
-  const allTweets: { worker: string; tweets: any[] }[] = [];
-
-  for (const [workerUrl, result] of Object.entries(results)) {
-    const workerName = workerUrl.replace("https://", "");
-
-    if (result.success && result.result) {
-      // Use the tweetCount from metadata if available, otherwise count manually
-      const tweetCount = result.metadata.tweetCount || countTweetsInResult(result.result);
-      tweetsInThisRun += tweetCount;
-      successCount++;
-      console.log(`✅ Worker ${workerName}: ${tweetCount} tweets`);
-
-      // Extract tweet information
-      const tweetInfo = extractTweetInfo(result.result);
-      if (tweetInfo.length > 0) {
-        allTweets.push({
-          worker: workerName,
-          tweets: tweetInfo,
-        });
-      }
-    } else {
-      failureCount++;
-      console.log(`❌ Worker ${workerName}: Failed - ${result.error || "Unknown error"}`);
-    }
-  }
-
-  // Update total tweet count
-  totalTweetCount += tweetsInThisRun;
-
-  console.log("---------------------------------------------");
-  console.log(`Workers Summary: ${successCount} succeeded, ${failureCount} failed`);
-  console.log(`Tweets in this run: ${tweetsInThisRun}`);
-  console.log(`Total tweets scraped: ${totalTweetCount}`);
-  console.log("---------------------------------------------");
-}
-
-/**
  * Main function to execute Twitter jobs across all workers
  */
-async function executeRun(): Promise<void> {
+async function executeRun(randomCadence: number): Promise<void> {
   console.log("Starting Twitter scraper client");
 
-  // Select a random Twitter query for this run
+  // Select random values for this run
   const randomQuery = getRandomItem(twitterQueries);
+  const randomMaxResults = getRandomItem(maxResultsList);
+
   console.log(`Selected random query: "${randomQuery}"`);
+  console.log(`Selected random max results: ${randomMaxResults}`);
 
   // Process each worker URL simultaneously
   console.log(`Sending requests to ${workerUrls.length} workers simultaneously...`);
@@ -317,7 +280,7 @@ async function executeRun(): Promise<void> {
         error: result.reason?.toString() || "Promise rejected",
         metadata: {
           query: randomQuery,
-          maxResults,
+          maxResults: randomMaxResults,
           workerUrl,
           timing: {
             executedAt: new Date().toISOString(),
@@ -329,36 +292,95 @@ async function executeRun(): Promise<void> {
   });
 
   // Generate report
-  generateRunReport(processedResults, randomQuery);
+  generateRunReport(processedResults, randomQuery, randomMaxResults, randomCadence);
 
   return;
+}
+
+/**
+ * Generate a report for the current run
+ */
+function generateRunReport(
+  results: { [key: string]: JobResponse },
+  query: string,
+  maxResults: number,
+  cadence: number
+): void {
+  console.log("\n---------------------------------------------");
+  console.log(`📊 REPORT: Twitter Search Results`);
+  console.log(`Query: "${query}"`);
+  console.log(`Max Results: ${maxResults}`);
+  console.log(`Cadence: ${cadence} seconds`);
+  console.log("---------------------------------------------");
+
+  let successCount = 0;
+  let failureCount = 0;
+  let tweetsInThisRun = 0;
+  const allTweets: { worker: string; tweets: any[] }[] = [];
+
+  for (const [workerUrl, result] of Object.entries(results)) {
+    const workerName = workerUrl.replace("https://", "");
+
+    if (result.success && result.result) {
+      // Use the tweetCount from metadata if available, otherwise count manually
+      const tweetCount = result.metadata.tweetCount || countTweetsInResult(result.result);
+      tweetsInThisRun += tweetCount;
+      successCount++;
+      console.log(`✅ Worker ${workerName}: ${tweetCount} tweets`);
+
+      // Extract tweet information
+      const tweetInfo = extractTweetInfo(result.result);
+      if (tweetInfo.length > 0) {
+        allTweets.push({
+          worker: workerName,
+          tweets: tweetInfo,
+        });
+      }
+    } else {
+      failureCount++;
+      console.log(`❌ Worker ${workerName}: Failed - ${result.error || "Unknown error"}`);
+    }
+  }
+
+  // Update total tweet count
+  totalTweetCount += tweetsInThisRun;
+
+  console.log("---------------------------------------------");
+  console.log(`Workers Summary: ${successCount} succeeded, ${failureCount} failed`);
+  console.log(`Tweets in this run: ${tweetsInThisRun}`);
+  console.log(`Total tweets scraped: ${totalTweetCount}`);
+  console.log("---------------------------------------------");
 }
 
 /**
  * Main function with optional repeated execution based on cadence
  */
 async function main(): Promise<void> {
-  if (cadence <= 0) {
+  // Select a random cadence for this session
+  const randomCadence = getRandomItem(cadencesList);
+  console.log(`Selected random cadence: ${randomCadence} seconds`);
+
+  if (randomCadence <= 0) {
     // Run once and exit
-    await executeRun();
+    await executeRun(randomCadence);
     return;
   }
 
   // Run on a cadence (repeated schedule)
-  console.log(`Running with a cadence of ${cadence} seconds`);
+  console.log(`Running with a cadence of ${randomCadence} seconds`);
 
   // Execute immediately for the first time
-  await executeRun();
+  await executeRun(randomCadence);
 
   // Set up interval for repeated execution
   setInterval(async () => {
     console.log(`\n--- Executing scheduled run (${new Date().toISOString()}) ---\n`);
     try {
-      await executeRun();
+      await executeRun(randomCadence);
     } catch (error) {
       console.error("Error during scheduled run:", error);
     }
-  }, cadence * 1000);
+  }, randomCadence * 1000);
 }
 
 // Run the main function
