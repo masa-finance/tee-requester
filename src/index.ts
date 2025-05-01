@@ -52,7 +52,11 @@ function getRandomItem<T>(array: T[]): T {
 /**
  * Execute Twitter job for a single worker
  */
-async function executeWorkerJob(workerUrl: string, query: string): Promise<JobResponse> {
+async function executeWorkerJob(
+  workerUrl: string,
+  query: string,
+  maxResults: number
+): Promise<JobResponse> {
   console.log(`Worker URL: ${workerUrl}`);
   console.log(`Query: ${query}`);
   console.log(`Allow self-signed certificates: ${allowSelfSigned}`);
@@ -61,13 +65,12 @@ async function executeWorkerJob(workerUrl: string, query: string): Promise<JobRe
   const client = new TeeClient(workerUrl, allowSelfSigned);
 
   try {
-    const randomMaxResults = getRandomItem(maxResultsList);
-    console.log(`Executing Twitter search for "${query}" with max results: ${randomMaxResults}`);
+    console.log(`Executing Twitter search for "${query}" with max results: ${maxResults}`);
 
     // Execute the Twitter sequence
     const result: JobResponse = await client.executeTwitterSequence(
       query,
-      randomMaxResults,
+      maxResults,
       3, // maxRetries
       2000 // delay between retries (ms)
     );
@@ -80,7 +83,7 @@ async function executeWorkerJob(workerUrl: string, query: string): Promise<JobRe
       error: error instanceof Error ? error.message : String(error),
       metadata: {
         query,
-        maxResults: getRandomItem(maxResultsList),
+        maxResults,
         workerUrl,
         timing: {
           executedAt: new Date().toISOString(),
@@ -219,7 +222,9 @@ async function executeRun(randomCadence: number): Promise<void> {
   // Process each worker URL simultaneously
   console.log(`Sending requests to ${workerUrls.length} workers simultaneously...`);
 
-  const jobPromises = workerUrls.map((workerUrl) => executeWorkerJob(workerUrl, randomQuery));
+  const jobPromises = workerUrls.map((workerUrl) =>
+    executeWorkerJob(workerUrl, randomQuery, randomMaxResults)
+  );
 
   // Wait for all promises to settle (either resolve or reject)
   const results = await Promise.allSettled(jobPromises);
