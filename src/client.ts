@@ -84,7 +84,7 @@ export class TeeClient {
   ): Promise<string> {
     try {
       const response = await this.httpClient.post("/job/generate", {
-        type: "twitter-scraper",
+        type: "twitter-credential-scraper",
         arguments: {
           max_results: maxResults,
           query: query,

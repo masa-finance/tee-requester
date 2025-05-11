@@ -1,10 +1,31 @@
 services:
-  tee-requester:
+  typescript:
     build:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file: .env
+    environment:
+      - NODE_ENV=production
+      - WORKER_URLS=${WORKER_URLS}
+      - ALLOW_INSECURE_TLS=${ALLOW_INSECURE_TLS}
+      - TWITTER_QUERIES=${TWITTER_QUERIES}
+      - MAX_RESULTS=${MAX_RESULTS}
+      - CADENCES=${CADENCES}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  
+  python:
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - WORKER_URLS=${WORKER_URLS}
     logging:
       driver: json-file
       options:
