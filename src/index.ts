@@ -20,6 +20,9 @@ const cadencesList = (process.env.CADENCES || "60")
   .split(",")
   .map((num) => parseInt(num.trim(), 10))
   .filter((num) => !isNaN(num));
+const maxJobWaitTimeMs = parseInt(process.env.MAX_JOB_WAIT_TIME_MS || "30000", 10);
+const initialPollIntervalMs = parseInt(process.env.INITIAL_POLL_INTERVAL_MS || "2000", 10);
+const maxRetries = parseInt(process.env.MAX_RETRIES || "3", 10);
 
 // Tracking total tweets scraped
 let totalTweetCount = 0;
@@ -66,13 +69,16 @@ async function executeWorkerJob(
 
   try {
     console.log(`Executing Twitter search for "${query}" with max results: ${maxResults}`);
+    console.log(
+      `Max wait time: ${maxJobWaitTimeMs}ms, Initial poll interval: ${initialPollIntervalMs}ms, Max retries: ${maxRetries}`
+    );
 
     // Execute the Twitter sequence
     const result: JobResponse = await client.executeTwitterSequence(
       query,
       maxResults,
-      3, // maxRetries
-      2000 // delay between retries (ms)
+      maxRetries,
+      maxJobWaitTimeMs / maxRetries // use as delay between retries
     );
 
     return result;
@@ -320,6 +326,7 @@ function generateRunReport(
 
   let successCount = 0;
   let failureCount = 0;
+  let inProgressCount = 0;
   let tweetsInThisRun = 0;
   const allTweets: { worker: string; tweets: any[] }[] = [];
 
@@ -342,8 +349,20 @@ function generateRunReport(
         });
       }
     } else {
-      failureCount++;
-      console.log(`❌ Worker ${workerName}: Failed - ${result.error || "Unknown error"}`);
+      // Check if this was a job-in-progress situation
+      if (result.metadata.jobStatus && !result.metadata.jobStatus.complete) {
+        inProgressCount++;
+        const attempts = result.metadata.jobStatus.attempts || 0;
+        const jobId = result.metadata.jobStatus.jobId || "unknown";
+        const responseTime = result.metadata.timing.responseTimeMs || 0;
+
+        console.log(`⏳ Worker ${workerName}: In progress - JobID: ${jobId}`);
+        console.log(`   - Attempts: ${attempts}, Response time: ${responseTime}ms`);
+        console.log(`   - Status: ${result.metadata.jobStatus.status || "No status available"}`);
+      } else {
+        failureCount++;
+        console.log(`❌ Worker ${workerName}: Failed - ${result.error || "Unknown error"}`);
+      }
     }
   }
 
@@ -351,7 +370,9 @@ function generateRunReport(
   totalTweetCount += tweetsInThisRun;
 
   console.log("---------------------------------------------");
-  console.log(`Workers Summary: ${successCount} succeeded, ${failureCount} failed`);
+  console.log(
+    `Workers Summary: ${successCount} succeeded, ${failureCount} failed, ${inProgressCount} in progress`
+  );
   console.log(`Tweets in this run: ${tweetsInThisRun}`);
   console.log(`Total tweets scraped: ${totalTweetCount}`);
   console.log("---------------------------------------------");

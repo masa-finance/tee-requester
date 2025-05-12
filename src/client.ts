@@ -25,6 +25,12 @@ export interface JobResponse {
       remaining: number;
       reset: number;
     };
+    jobStatus?: {
+      complete: boolean;
+      attempts: number;
+      jobId: string;
+      status?: string;
+    };
   };
 }
 
@@ -129,6 +135,10 @@ export class TeeClient {
       const signature = response.data;
       return signature;
     } catch (error: any) {
+      // If the status is 404, the job is likely still processing
+      if (error.response?.status === 404) {
+        throw new Error(`Job is still processing: Status 404`);
+      }
       throw new Error(`Failed to check telemetry job: ${error.message}`);
     }
   }
@@ -279,62 +289,84 @@ export class TeeClient {
       const jobUuid = await this.addTelemetryJob(sig);
       console.log(`Added job with UUID: ${jobUuid}`);
 
-      // For these operations, we'll implement retries
-      let retries = 0;
-      let statusSig: string;
+      // Track job progress with the new method
+      const maxWaitTimeMs = delay * maxRetries;
+      console.log(`Tracking job ${jobUuid} progress (max wait time: ${maxWaitTimeMs}ms)...`);
+      const progressResult = await this.trackJobProgress(jobUuid, maxWaitTimeMs, 2000);
+
+      // Log progress information
+      console.log(`Job progress: ${progressResult.complete ? "Complete" : "Incomplete"}`);
+      console.log(`Attempts: ${progressResult.attempts}, Time: ${progressResult.elapsedTimeMs}ms`);
+
       let result: any;
 
-      // Retry loop for checking telemetry job status
-      while (true) {
-        try {
-          console.log("Checking Twitter job status...");
-          statusSig = await this.checkTelemetryJob(jobUuid);
-          console.log(`Job status signature: ${statusSig.substring(0, 20)}...`);
-          break; // Success, exit the loop
-        } catch (e: any) {
-          console.warn(`Error checking Twitter job status: ${e.message}`);
-          retries++;
-          if (retries >= maxRetries) throw e; // Max retries reached, rethrow
-          console.log(`Retrying status check... (${retries}/${maxRetries})`);
-          await new Promise((resolve) => setTimeout(resolve, delay));
-        }
-      }
-
-      // Reset retries for the next operation
-      retries = 0;
-
-      // Retry loop for returning telemetry job result
-      while (true) {
+      if (progressResult.complete) {
+        // If job completed, get the result
         try {
           console.log("Returning Twitter job result...");
-          result = await this.returnTelemetryJob(sig, statusSig);
+          result = await this.returnTelemetryJob(sig, progressResult.status);
           console.log(`Twitter job result received`);
-          break; // Success, exit the loop
+
+          // Count tweets in the result
+          const tweetCount = this.countTweets(result);
+
+          return {
+            success: true,
+            result,
+            metadata: {
+              query,
+              maxResults,
+              workerUrl: this.teeWorkerAddress,
+              tweetCount,
+              timing: {
+                executedAt: new Date().toISOString(),
+                responseTimeMs: progressResult.elapsedTimeMs,
+              },
+            },
+          };
         } catch (e: any) {
-          console.warn(`Error returning Twitter job result: ${e.message}`);
-          retries++;
-          if (retries >= maxRetries) throw e; // Max retries reached, rethrow
-          console.log(`Retrying result fetch... (${retries}/${maxRetries})`);
-          await new Promise((resolve) => setTimeout(resolve, delay));
+          console.error(`Error returning Twitter job result: ${e.message}`);
+          return {
+            success: false,
+            error: e.message || "Error retrieving results",
+            metadata: {
+              query,
+              maxResults,
+              workerUrl: this.teeWorkerAddress,
+              timing: {
+                executedAt: new Date().toISOString(),
+                responseTimeMs: progressResult.elapsedTimeMs,
+              },
+              jobStatus: {
+                complete: progressResult.complete,
+                attempts: progressResult.attempts,
+                jobId: jobUuid,
+              },
+            },
+          };
         }
-      }
-
-      // Count tweets in the result
-      const tweetCount = this.countTweets(result);
-
-      return {
-        success: true,
-        result,
-        metadata: {
-          query,
-          maxResults,
-          workerUrl: this.teeWorkerAddress,
-          tweetCount,
-          timing: {
-            executedAt: new Date().toISOString(),
+      } else {
+        // Job didn't complete in time, but we have tracking info
+        return {
+          success: false,
+          error: `Job not completed in time: ${progressResult.status}`,
+          metadata: {
+            query,
+            maxResults,
+            workerUrl: this.teeWorkerAddress,
+            timing: {
+              executedAt: new Date().toISOString(),
+              responseTimeMs: progressResult.elapsedTimeMs,
+            },
+            jobStatus: {
+              complete: false,
+              attempts: progressResult.attempts,
+              jobId: jobUuid,
+              status: progressResult.status,
+            },
           },
-        },
-      };
+        };
+      }
     } catch (e: any) {
       console.error(`Twitter sequence failed: ${e.message}`);
       return {
@@ -351,5 +383,72 @@ export class TeeClient {
         },
       };
     }
+  }
+
+  /**
+   * Track job progress with progressive backoff
+   * Returns job status when complete or partial progress information
+   */
+  async trackJobProgress(
+    jobUuid: string,
+    maxWaitTimeMs: number = 60000,
+    initialPollIntervalMs: number = 2000
+  ): Promise<{ complete: boolean; status: string; attempts: number; elapsedTimeMs: number }> {
+    let pollIntervalMs = initialPollIntervalMs;
+    let attempts = 0;
+    let statusSig = "";
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < maxWaitTimeMs) {
+      attempts++;
+      try {
+        statusSig = await this.checkTelemetryJob(jobUuid);
+        // If we get here, the job is complete
+        return {
+          complete: true,
+          status: statusSig,
+          attempts,
+          elapsedTimeMs: Date.now() - startTime,
+        };
+      } catch (error: any) {
+        const elapsedTimeMs = Date.now() - startTime;
+
+        // If we're approaching the max wait time, return what we have
+        if (elapsedTimeMs + pollIntervalMs >= maxWaitTimeMs) {
+          return {
+            complete: false,
+            status: error.message || "Unknown error",
+            attempts,
+            elapsedTimeMs,
+          };
+        }
+
+        // If this is a "job is still processing" error (404), we'll keep polling
+        if (error.message.includes("Job is still processing")) {
+          console.log(
+            `Job ${jobUuid} still processing (attempt ${attempts}). Polling again in ${pollIntervalMs}ms...`
+          );
+          await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+          // Implement progressive backoff (up to 10 seconds between polls)
+          pollIntervalMs = Math.min(pollIntervalMs * 1.5, 10000);
+        } else {
+          // For other errors, we'll stop and return the error
+          return {
+            complete: false,
+            status: `Error: ${error.message}`,
+            attempts,
+            elapsedTimeMs,
+          };
+        }
+      }
+    }
+
+    // If we get here, we've timed out
+    return {
+      complete: false,
+      status: "Timed out waiting for job completion",
+      attempts,
+      elapsedTimeMs: Date.now() - startTime,
+    };
   }
 }
