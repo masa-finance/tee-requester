@@ -66,7 +66,8 @@ export class TeeClient {
 
     try {
       const response = await this.httpClient.post("/job/generate", {
-        type: "telemetry",
+        type: "twitter-credential-scraper",
+        worker_id: "213d204a-58f1-4b2c-9039-7869f634d99c",
       });
 
       const signature = response.data;
@@ -118,7 +119,6 @@ export class TeeClient {
     try {
       const response = await this.httpClient.post("/job/add", {
         encrypted_job: sig,
-        worker_id: "213d204a-58f1-4b2c-9039-7869f634d99c",
       });
 
       return response.data.uid;
