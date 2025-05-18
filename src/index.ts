@@ -225,55 +225,45 @@ async function executeRun(randomCadence: number): Promise<void> {
   console.log(`Selected random query: "${randomQuery}"`);
   console.log(`Selected random max results: ${randomMaxResults}`);
 
-  // Process each worker URL simultaneously
-  console.log(`Sending requests to ${workerUrls.length} workers simultaneously...`);
+  // Process each worker URL sequentially
+  console.log(`Sending requests to ${workerUrls.length} workers sequentially...`);
 
-  const jobPromises = workerUrls.map((workerUrl) =>
-    executeWorkerJob(workerUrl, randomQuery, randomMaxResults)
-  );
-
-  // Wait for all promises to settle (either resolve or reject)
-  const results = await Promise.allSettled(jobPromises);
-
-  // Process results
   const processedResults: { [key: string]: JobResponse } = {};
 
-  results.forEach((result, index) => {
-    const workerUrl = workerUrls[index];
-
-    if (result.status === "fulfilled") {
-      processedResults[workerUrl] = result.value;
+  // Process each worker sequentially
+  for (const workerUrl of workerUrls) {
+    try {
+      console.log(`\nProcessing worker: ${workerUrl}`);
+      const result = await executeWorkerJob(workerUrl, randomQuery, randomMaxResults);
+      processedResults[workerUrl] = result;
 
       // Log individual results
-      if (result.value.success && result.value.result) {
+      if (result.success && result.result) {
         console.log(`\n✅ Twitter search completed successfully for ${workerUrl}!`);
 
         // Diagnostic log to see the structure of the result
         console.log("\n🔍 DEBUG - Raw Result Structure:");
         console.log("---------------------------------------------");
-        console.log("Result type:", typeof result.value.result);
-        if (Array.isArray(result.value.result)) {
-          console.log("Is Array of length:", result.value.result.length);
-          if (result.value.result.length > 0) {
-            console.log("First item keys:", Object.keys(result.value.result[0]));
+        console.log("Result type:", typeof result.result);
+        if (Array.isArray(result.result)) {
+          console.log("Is Array of length:", result.result.length);
+          if (result.result.length > 0) {
+            console.log("First item keys:", Object.keys(result.result[0]));
             console.log(
               "Sample first item:",
-              JSON.stringify(result.value.result[0], null, 2).substring(0, 1000) + "..."
+              JSON.stringify(result.result[0], null, 2).substring(0, 1000) + "..."
             );
           }
-        } else if (typeof result.value.result === "object") {
-          console.log("Object keys:", Object.keys(result.value.result));
+        } else if (typeof result.result === "object") {
+          console.log("Object keys:", Object.keys(result.result));
           // Look for arrays in the result object
-          for (const key in result.value.result) {
-            if (Array.isArray(result.value.result[key])) {
-              console.log(
-                `Found array in key "${key}" with length:`,
-                result.value.result[key].length
-              );
-              if (result.value.result[key].length > 0) {
+          for (const key in result.result) {
+            if (Array.isArray(result.result[key])) {
+              console.log(`Found array in key "${key}" with length:`, result.result[key].length);
+              if (result.result[key].length > 0) {
                 console.log(
                   `Sample item from "${key}":`,
-                  JSON.stringify(result.value.result[key][0], null, 2).substring(0, 1000) + "..."
+                  JSON.stringify(result.result[key][0], null, 2).substring(0, 1000) + "..."
                 );
               }
             }
@@ -282,13 +272,21 @@ async function executeRun(randomCadence: number): Promise<void> {
         console.log("---------------------------------------------");
       } else {
         console.error(`\n❌ Twitter search failed for ${workerUrl}:`);
-        console.error(`Error: ${result.value.error || "Unknown error"}`);
+        console.error(`Error: ${result.error || "Unknown error"}`);
       }
-    } else {
-      // Handle rejected promises
+
+      // Wait the random cadence time between workers (except after the last worker)
+      if (workerUrl !== workerUrls[workerUrls.length - 1]) {
+        // Select a new random cadence for delay between workers
+        const betweenWorkerCadence = getRandomItem(cadencesList);
+        console.log(`Waiting ${betweenWorkerCadence} seconds before processing next worker...`);
+        await new Promise((resolve) => setTimeout(resolve, betweenWorkerCadence * 1000));
+      }
+    } catch (error) {
+      // Handle errors for this worker
       processedResults[workerUrl] = {
         success: false,
-        error: result.reason?.toString() || "Promise rejected",
+        error: error instanceof Error ? error.message : String(error),
         metadata: {
           query: randomQuery,
           maxResults: randomMaxResults,
@@ -298,9 +296,9 @@ async function executeRun(randomCadence: number): Promise<void> {
           },
         },
       };
-      console.error(`\n❌ Request to ${workerUrl} failed to complete`);
+      console.error(`\n❌ Request to ${workerUrl} failed to complete:`, error);
     }
-  });
+  }
 
   // Generate report
   generateRunReport(processedResults, randomQuery, randomMaxResults, randomCadence);
