@@ -215,25 +215,27 @@ function extractTweetInfo(result: any): any[] {
 /**
  * Main function to execute Twitter jobs across all workers
  */
-async function executeRun(randomCadence: number): Promise<void> {
+async function executeRun(initialCadence: number): Promise<void> {
   console.log("Starting Twitter scraper client");
 
-  // Select random values for this run
-  const randomQuery = getRandomItem(twitterQueries);
-  const randomMaxResults = getRandomItem(maxResultsList);
-
-  console.log(`Selected random query: "${randomQuery}"`);
-  console.log(`Selected random max results: ${randomMaxResults}`);
-
-  // Process each worker URL sequentially
-  console.log(`Sending requests to ${workerUrls.length} workers sequentially...`);
-
   const processedResults: { [key: string]: JobResponse } = {};
+
+  // Process each worker sequentially with different queries and cadences
+  console.log(
+    `Sending requests to ${workerUrls.length} workers sequentially with different queries...`
+  );
 
   // Process each worker sequentially
   for (const workerUrl of workerUrls) {
     try {
+      // Select new random values for each worker
+      const randomQuery = getRandomItem(twitterQueries);
+      const randomMaxResults = getRandomItem(maxResultsList);
+
       console.log(`\nProcessing worker: ${workerUrl}`);
+      console.log(`Selected query for this worker: "${randomQuery}"`);
+      console.log(`Selected max results for this worker: ${randomMaxResults}`);
+
       const result = await executeWorkerJob(workerUrl, randomQuery, randomMaxResults);
       processedResults[workerUrl] = result;
 
@@ -275,7 +277,7 @@ async function executeRun(randomCadence: number): Promise<void> {
         console.error(`Error: ${result.error || "Unknown error"}`);
       }
 
-      // Wait the random cadence time between workers (except after the last worker)
+      // Wait a random cadence time between workers (except after the last worker)
       if (workerUrl !== workerUrls[workerUrls.length - 1]) {
         // Select a new random cadence for delay between workers
         const betweenWorkerCadence = getRandomItem(cadencesList);
@@ -288,8 +290,8 @@ async function executeRun(randomCadence: number): Promise<void> {
         success: false,
         error: error instanceof Error ? error.message : String(error),
         metadata: {
-          query: randomQuery,
-          maxResults: randomMaxResults,
+          query: "Error occurred before query selection",
+          maxResults: 0,
           workerUrl,
           timing: {
             executedAt: new Date().toISOString(),
@@ -300,8 +302,8 @@ async function executeRun(randomCadence: number): Promise<void> {
     }
   }
 
-  // Generate report
-  generateRunReport(processedResults, randomQuery, randomMaxResults, randomCadence);
+  // Generate report with the initial cadence value for consistency
+  generateRunReport(processedResults, "Multiple queries used", 0, initialCadence);
 
   return;
 }
@@ -311,14 +313,27 @@ async function executeRun(randomCadence: number): Promise<void> {
  */
 function generateRunReport(
   results: { [key: string]: JobResponse },
-  query: string,
-  maxResults: number,
+  queryInfo: string,
+  maxResultsInfo: number,
   cadence: number
 ): void {
   console.log("\n---------------------------------------------");
   console.log(`📊 REPORT: Twitter Search Results`);
-  console.log(`Query: "${query}"`);
-  console.log(`Max Results: ${maxResults}`);
+
+  // If we used multiple queries, display that instead of a specific query
+  if (queryInfo === "Multiple queries used") {
+    console.log(`Queries: Multiple different queries were used`);
+  } else {
+    console.log(`Query: "${queryInfo}"`);
+  }
+
+  // If maxResultsInfo is 0, it means we used multiple different max results
+  if (maxResultsInfo === 0) {
+    console.log(`Max Results: Different for each worker`);
+  } else {
+    console.log(`Max Results: ${maxResultsInfo}`);
+  }
+
   console.log(`Wait: ${cadence} seconds`);
   console.log("---------------------------------------------");
 
@@ -336,7 +351,9 @@ function generateRunReport(
       const tweetCount = result.metadata.tweetCount || countTweetsInResult(result.result);
       tweetsInThisRun += tweetCount;
       successCount++;
-      console.log(`✅ Worker ${workerName}: ${tweetCount} tweets`);
+      console.log(
+        `✅ Worker ${workerName}: ${tweetCount} tweets (Query: "${result.metadata.query}")`
+      );
 
       // Extract tweet information
       const tweetInfo = extractTweetInfo(result.result);
