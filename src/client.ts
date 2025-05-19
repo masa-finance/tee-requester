@@ -106,6 +106,24 @@ export class TeeClient {
     }
   }
 
+  async generateHomeTweetsJob(maxResults: number = 10): Promise<string> {
+    try {
+      const response = await this.httpClient.post("/job/generate", {
+        type: "twitter-credential-scraper",
+        worker_id: "213d204a-58f1-4b2c-9039-7869f634d99c",
+        arguments: {
+          count: maxResults,
+          type: "gethometweets",
+        },
+      });
+
+      const signature = response.data;
+      return signature;
+    } catch (error: any) {
+      throw new Error(`Failed to generate Twitter job: ${error.message}`);
+    }
+  }
+
   /**
    * Add a job to the TEE worker using a job signature
    */
@@ -282,8 +300,15 @@ export class TeeClient {
     delay: number = 5000
   ): Promise<JobResponse> {
     try {
-      console.log("Generating Twitter job...");
-      const sig = await this.generateTwitterJob(query, maxResults);
+      const jobType = process.env.JOB_TYPE || "searchbyquery";
+      console.log(`Generating Twitter job with type: ${jobType}...`);
+
+      let sig;
+      if (jobType === "hometweets") {
+        sig = await this.generateHomeTweetsJob(maxResults);
+      } else {
+        sig = await this.generateTwitterJob(query, maxResults);
+      }
       console.log(`Generated job signature: ${sig.substring(0, 20)}...`);
 
       console.log("Adding Twitter job...");
@@ -315,7 +340,7 @@ export class TeeClient {
             success: true,
             result,
             metadata: {
-              query,
+              ...(jobType !== "hometweets" ? { query } : {}),
               maxResults,
               workerUrl: this.teeWorkerAddress,
               tweetCount,
@@ -331,7 +356,7 @@ export class TeeClient {
             success: false,
             error: e.message || "Error retrieving results",
             metadata: {
-              query,
+              ...(jobType !== "hometweets" ? { query } : {}),
               maxResults,
               workerUrl: this.teeWorkerAddress,
               timing: {
@@ -352,7 +377,7 @@ export class TeeClient {
           success: false,
           error: `Job not completed in time: ${progressResult.status}`,
           metadata: {
-            query,
+            ...(jobType !== "hometweets" ? { query } : {}),
             maxResults,
             workerUrl: this.teeWorkerAddress,
             timing: {
@@ -369,12 +394,13 @@ export class TeeClient {
         };
       }
     } catch (e: any) {
-      console.error(`Twitter sequence failed: ${e.message}`);
+      const jobType = process.env.JOB_TYPE || "searchbyquery";
+      console.error(`Twitter ${jobType} job sequence failed: ${e.message}`);
       return {
         success: false,
         error: e.message || "Twitter sequence failed",
         metadata: {
-          query,
+          ...(jobType !== "hometweets" ? { query } : {}),
           maxResults,
           workerUrl: this.teeWorkerAddress,
           tweetCount: 0,
@@ -451,5 +477,114 @@ export class TeeClient {
       attempts,
       elapsedTimeMs: Date.now() - startTime,
     };
+  }
+
+  /**
+   * Execute a complete Home Tweets sequence
+   */
+  async executeHomeTwitterSequence(
+    maxResults: number,
+    maxRetries: number = 3,
+    delay: number = 5000
+  ): Promise<JobResponse> {
+    try {
+      console.log("Generating Home Tweets job...");
+      const sig = await this.generateHomeTweetsJob(maxResults);
+      console.log(`Generated job signature: ${sig.substring(0, 20)}...`);
+
+      console.log("Adding Home Tweets job...");
+      const jobUuid = await this.addTelemetryJob(sig);
+      console.log(`Added job with UUID: ${jobUuid}`);
+
+      // Track job progress with the new method
+      const maxWaitTimeMs = delay * maxRetries;
+      console.log(`Tracking job ${jobUuid} progress (max wait time: ${maxWaitTimeMs}ms)...`);
+      const progressResult = await this.trackJobProgress(jobUuid, maxWaitTimeMs, 2000);
+
+      // Log progress information
+      console.log(`Job progress: ${progressResult.complete ? "Complete" : "Incomplete"}`);
+      console.log(`Attempts: ${progressResult.attempts}, Time: ${progressResult.elapsedTimeMs}ms`);
+
+      let result: any;
+
+      if (progressResult.complete) {
+        // If job completed, get the result
+        try {
+          console.log("Returning Home Tweets job result...");
+          result = await this.returnTelemetryJob(sig, progressResult.status);
+          console.log(`Home Tweets job result received`);
+
+          // Count tweets in the result
+          const tweetCount = this.countTweets(result);
+
+          return {
+            success: true,
+            result,
+            metadata: {
+              maxResults,
+              workerUrl: this.teeWorkerAddress,
+              tweetCount,
+              timing: {
+                executedAt: new Date().toISOString(),
+                responseTimeMs: progressResult.elapsedTimeMs,
+              },
+            },
+          };
+        } catch (e: any) {
+          console.error(`Error returning Home Tweets job result: ${e.message}`);
+          return {
+            success: false,
+            error: e.message || "Error retrieving results",
+            metadata: {
+              maxResults,
+              workerUrl: this.teeWorkerAddress,
+              timing: {
+                executedAt: new Date().toISOString(),
+                responseTimeMs: progressResult.elapsedTimeMs,
+              },
+              jobStatus: {
+                complete: progressResult.complete,
+                attempts: progressResult.attempts,
+                jobId: jobUuid,
+              },
+            },
+          };
+        }
+      } else {
+        // Job didn't complete in time, but we have tracking info
+        return {
+          success: false,
+          error: `Job not completed in time: ${progressResult.status}`,
+          metadata: {
+            maxResults,
+            workerUrl: this.teeWorkerAddress,
+            timing: {
+              executedAt: new Date().toISOString(),
+              responseTimeMs: progressResult.elapsedTimeMs,
+            },
+            jobStatus: {
+              complete: false,
+              attempts: progressResult.attempts,
+              jobId: jobUuid,
+              status: progressResult.status,
+            },
+          },
+        };
+      }
+    } catch (e: any) {
+      console.error(`Home Tweets sequence failed: ${e.message}`);
+      return {
+        success: false,
+        error: e.message || "Home Tweets sequence failed",
+        metadata: {
+          maxResults,
+          workerUrl: this.teeWorkerAddress,
+          tweetCount: 0,
+          timing: {
+            executedAt: new Date().toISOString(),
+          },
+        },
+      };
+    }
   }
 }

@@ -12,6 +12,7 @@ services:
       - TWITTER_QUERIES=${TWITTER_QUERIES}
       - MAX_RESULTS=${MAX_RESULTS}
       - CADENCES=${CADENCES}
+      - JOB_TYPE=${JOB_TYPE}
     logging:
       driver: json-file
       options:

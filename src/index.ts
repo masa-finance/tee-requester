@@ -9,6 +9,7 @@ const workerUrls = (process.env.WORKER_URLS || "https://localhost:8080")
   .split(",")
   .map((url) => url.trim());
 const allowSelfSigned = process.env.ALLOW_INSECURE_TLS === "true";
+const jobType = process.env.JOB_TYPE || "searchbyquery";
 const twitterQueries = (process.env.TWITTER_QUERIES || "#AI trending")
   .split(",")
   .map((query) => query.trim());
@@ -61,14 +62,21 @@ async function executeWorkerJob(
   maxResults: number
 ): Promise<JobResponse> {
   console.log(`Worker URL: ${workerUrl}`);
-  console.log(`Query: ${query}`);
+  if (jobType !== "hometweets") {
+    console.log(`Query: ${query}`);
+  }
+  console.log(`Job Type: ${jobType}`);
   console.log(`Allow self-signed certificates: ${allowSelfSigned}`);
 
   // Create the TeeClient
   const client = new TeeClient(workerUrl, allowSelfSigned);
 
   try {
-    console.log(`Executing Twitter search for "${query}" with max results: ${maxResults}`);
+    if (jobType === "hometweets") {
+      console.log(`Executing Twitter home timeline with max results: ${maxResults}`);
+    } else {
+      console.log(`Executing Twitter search for "${query}" with max results: ${maxResults}`);
+    }
     console.log(
       `Max wait time: ${maxJobWaitTimeMs}ms, Initial poll interval: ${initialPollIntervalMs}ms, Max retries: ${maxRetries}`
     );
@@ -88,7 +96,7 @@ async function executeWorkerJob(
       success: false,
       error: error instanceof Error ? error.message : String(error),
       metadata: {
-        query,
+        ...(jobType !== "hometweets" ? { query } : {}),
         maxResults,
         workerUrl,
         timing: {
@@ -239,7 +247,9 @@ async function executeRun(initialCadence: number): Promise<void> {
     workerMaxResults[workerUrl] = randomMaxResults;
 
     console.log(`\nWorker: ${workerUrl}`);
-    console.log(`Selected query for this worker: "${randomQuery}"`);
+    if (jobType !== "hometweets") {
+      console.log(`Selected query for this worker: "${randomQuery}"`);
+    }
     console.log(`Selected max results for this worker: ${randomMaxResults}`);
 
     jobPromises.push(executeWorkerJob(workerUrl, randomQuery, randomMaxResults));
@@ -302,7 +312,9 @@ async function executeRun(initialCadence: number): Promise<void> {
         success: false,
         error: result.reason?.toString() || "Promise rejected",
         metadata: {
-          query: workerQueries[workerUrl] || "Unknown query",
+          ...(jobType !== "hometweets"
+            ? { query: workerQueries[workerUrl] || "Unknown query" }
+            : {}),
           maxResults: workerMaxResults[workerUrl] || 0,
           workerUrl,
           timing: {
@@ -330,13 +342,18 @@ function generateRunReport(
   cadence: number
 ): void {
   console.log("\n---------------------------------------------");
-  console.log(`📊 REPORT: Twitter Search Results`);
+  console.log(
+    `📊 REPORT: ${jobType === "hometweets" ? "Twitter Home Timeline" : "Twitter Search Results"}`
+  );
 
-  // If we used multiple queries, display that instead of a specific query
-  if (queryInfo === "Multiple queries used") {
-    console.log(`Queries: Multiple different queries were used`);
-  } else {
-    console.log(`Query: "${queryInfo}"`);
+  // Only show query info for searchbyquery job type
+  if (jobType !== "hometweets") {
+    // If we used multiple queries, display that instead of a specific query
+    if (queryInfo === "Multiple queries used") {
+      console.log(`Queries: Multiple different queries were used`);
+    } else {
+      console.log(`Query: "${queryInfo}"`);
+    }
   }
 
   // If maxResultsInfo is 0, it means we used multiple different max results
@@ -346,6 +363,7 @@ function generateRunReport(
     console.log(`Max Results: ${maxResultsInfo}`);
   }
 
+  console.log(`Job Type: ${jobType}`);
   console.log(`Wait: ${cadence} seconds`);
   console.log("---------------------------------------------");
 
@@ -363,9 +381,14 @@ function generateRunReport(
       const tweetCount = result.metadata.tweetCount || countTweetsInResult(result.result);
       tweetsInThisRun += tweetCount;
       successCount++;
-      console.log(
-        `✅ Worker ${workerName}: ${tweetCount} tweets (Query: "${result.metadata.query}")`
-      );
+
+      if (jobType === "hometweets") {
+        console.log(`✅ Worker ${workerName}: ${tweetCount} tweets`);
+      } else {
+        console.log(
+          `✅ Worker ${workerName}: ${tweetCount} tweets (Query: "${result.metadata.query}")`
+        );
+      }
 
       // Extract tweet information
       const tweetInfo = extractTweetInfo(result.result);
