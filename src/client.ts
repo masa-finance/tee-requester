@@ -92,7 +92,7 @@ export class TeeClient {
     try {
       const response = await this.httpClient.post("/job/generate", {
         type: "twitter-credential-scraper",
-        worker_id: "213d204a-58f1-4b2c-9039-7869f634d99c",
+        worker_id: "628dc1d4-f66f-440b-b098-e501702b7b71",
         arguments: {
           max_results: maxResults,
           query: query,
@@ -483,6 +483,14 @@ export class TeeClient {
           await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
           // Implement progressive backoff (up to 10 seconds between polls)
           pollIntervalMs = Math.min(pollIntervalMs * 1.5, 10000);
+        } else if (error.response?.status === 500) {
+          // For 500 errors, return immediately as a failure
+          return {
+            complete: false,
+            status: `Server Error (500): ${error.message}`,
+            attempts,
+            elapsedTimeMs,
+          };
         } else {
           // For other errors, we'll stop and return the error
           return {

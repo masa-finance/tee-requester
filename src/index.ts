@@ -327,9 +327,6 @@ async function executeRun(initialCadence: number): Promise<void> {
           }
         }
         console.log("---------------------------------------------");
-      } else {
-        console.error(`\n❌ Twitter ${jobType} failed for ${workerUrl}:`);
-        console.error(`Error: ${result.value.error || "Unknown error"}`);
       }
     } else {
       // Handle rejected promises
@@ -349,7 +346,6 @@ async function executeRun(initialCadence: number): Promise<void> {
           },
         },
       };
-      console.error(`\n❌ Request to ${workerUrl} failed to complete`);
     }
   });
 
@@ -438,14 +434,22 @@ function generateRunReport(
     } else {
       // Check if this was a job-in-progress situation
       if (result.metadata.jobStatus && !result.metadata.jobStatus.complete) {
-        inProgressCount++;
-        const attempts = result.metadata.jobStatus.attempts || 0;
-        const jobId = result.metadata.jobStatus.jobId || "unknown";
-        const responseTime = result.metadata.timing.responseTimeMs || 0;
+        // Check if the status contains a 500 error
+        if (result.metadata.jobStatus.status?.includes("500")) {
+          failureCount++;
+          console.log(
+            `❌ Worker ${workerName} (${jobType}): Failed - ${result.metadata.jobStatus.status}`
+          );
+        } else {
+          inProgressCount++;
+          const attempts = result.metadata.jobStatus.attempts || 0;
+          const jobId = result.metadata.jobStatus.jobId || "unknown";
+          const responseTime = result.metadata.timing.responseTimeMs || 0;
 
-        console.log(`⏳ Worker ${workerName} (${jobType}): In progress - JobID: ${jobId}`);
-        console.log(`   - Attempts: ${attempts}, Response time: ${responseTime}ms`);
-        console.log(`   - Status: ${result.metadata.jobStatus.status || "No status available"}`);
+          console.log(`⏳ Worker ${workerName} (${jobType}): In progress - JobID: ${jobId}`);
+          console.log(`   - Attempts: ${attempts}, Response time: ${responseTime}ms`);
+          console.log(`   - Status: ${result.metadata.jobStatus.status || "No status available"}`);
+        }
       } else {
         failureCount++;
         console.log(
