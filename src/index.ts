@@ -10,8 +10,8 @@ const workerUrls = (process.env.WORKER_URLS || "https://localhost:8080")
   .map((url) => url.trim());
 const allowSelfSigned = process.env.ALLOW_INSECURE_TLS === "true";
 // Define available job types
-// const JOB_TYPES = ["searchbyquery", "hometweets", "foryoutweets"];
-const JOB_TYPES = ["hometweets", "foryoutweets"];
+const JOB_TYPES = ["searchbyquery", "hometweets", "foryoutweets"];
+// const JOB_TYPES = ["hometweets", "foryoutweets"];
 const twitterQueries = (process.env.TWITTER_QUERIES || "#AI trending")
   .split(",")
   .map((query) => query.trim());
