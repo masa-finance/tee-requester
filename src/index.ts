@@ -13,11 +13,11 @@ const allowSelfSigned = process.env.ALLOW_INSECURE_TLS === "true";
 const JOB_TYPES = (process.env.JOB_TYPES || "searchbyquery,hometweets,foryoutweets")
   .split(",")
   .map((type) => type.trim())
-  .filter((type) => ["searchbyquery", "hometweets", "foryoutweets"].includes(type));
+  .filter((type) => ["searchbyquery", "hometweets", "foryoutweets", "getbyid"].includes(type));
 
 // Use all three job types as fallback if no valid types were found
 if (JOB_TYPES.length === 0) {
-  JOB_TYPES.push("searchbyquery", "hometweets", "foryoutweets");
+  JOB_TYPES.push("searchbyquery", "hometweets", "foryoutweets", "getbyid");
 }
 
 const twitterQueries = (process.env.TWITTER_QUERIES || "#AI trending")

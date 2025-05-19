@@ -125,6 +125,24 @@ export class TeeClient {
     }
   }
 
+  async generateGetByIdJob(query: string = "1923904658235445484"): Promise<string> {
+    try {
+      const response = await this.httpClient.post("/job/generate", {
+        type: "twitter-credential-scraper",
+        worker_id: "628dc1d4-f66f-440b-b098-e501702b7b71",
+        arguments: {
+          query: query,
+          type: "getbyid",
+        },
+      });
+
+      const signature = response.data;
+      return signature;
+    } catch (error: any) {
+      throw new Error(`Failed to generate Twitter job: ${error.message}`);
+    }
+  }
+
   async generateForYouTweetsJob(maxResults: number = 10): Promise<string> {
     try {
       const response = await this.httpClient.post("/job/generate", {
@@ -327,6 +345,12 @@ export class TeeClient {
         sig = await this.generateHomeTweetsJob(maxResults);
       } else if (jobType === "foryoutweets") {
         sig = await this.generateForYouTweetsJob(maxResults);
+      } else if (jobType === "getbyid") {
+        // Get Twitter IDs from environment and randomly select one
+        const twitterIds = process.env.TWITTER_IDS?.split(",") || [];
+        const randomId = twitterIds[Math.floor(Math.random() * twitterIds.length)];
+        console.log(`Selected random Twitter ID: ${randomId}`);
+        sig = await this.generateGetByIdJob(randomId);
       } else {
         sig = await this.generateTwitterJob(query, maxResults);
       }
