@@ -9,7 +9,8 @@ const workerUrls = (process.env.WORKER_URLS || "https://localhost:8080")
   .split(",")
   .map((url) => url.trim());
 const allowSelfSigned = process.env.ALLOW_INSECURE_TLS === "true";
-const jobType = process.env.JOB_TYPE || "searchbyquery";
+// Define available job types
+const JOB_TYPES = ["searchbyquery", "hometweets", "foryoutweets"];
 const twitterQueries = (process.env.TWITTER_QUERIES || "#AI trending")
   .split(",")
   .map((query) => query.trim());
@@ -59,10 +60,11 @@ function getRandomItem<T>(array: T[]): T {
 async function executeWorkerJob(
   workerUrl: string,
   query: string,
-  maxResults: number
+  maxResults: number,
+  jobType: string
 ): Promise<JobResponse> {
   console.log(`Worker URL: ${workerUrl}`);
-  if (jobType !== "hometweets") {
+  if (jobType === "searchbyquery") {
     console.log(`Query: ${query}`);
   }
   console.log(`Job Type: ${jobType}`);
@@ -74,12 +76,17 @@ async function executeWorkerJob(
   try {
     if (jobType === "hometweets") {
       console.log(`Executing Twitter home timeline with max results: ${maxResults}`);
+    } else if (jobType === "foryoutweets") {
+      console.log(`Executing Twitter 'For You' timeline with max results: ${maxResults}`);
     } else {
       console.log(`Executing Twitter search for "${query}" with max results: ${maxResults}`);
     }
     console.log(
       `Max wait time: ${maxJobWaitTimeMs}ms, Initial poll interval: ${initialPollIntervalMs}ms, Max retries: ${maxRetries}`
     );
+
+    // Override the default JOB_TYPE for this specific request
+    process.env.JOB_TYPE = jobType;
 
     // Execute the Twitter sequence
     const result: JobResponse = await client.executeTwitterSequence(
@@ -96,9 +103,10 @@ async function executeWorkerJob(
       success: false,
       error: error instanceof Error ? error.message : String(error),
       metadata: {
-        ...(jobType !== "hometweets" ? { query } : {}),
+        ...(jobType === "searchbyquery" ? { query } : {}),
         maxResults,
         workerUrl,
+        jobType,
         timing: {
           executedAt: new Date().toISOString(),
         },
@@ -226,7 +234,7 @@ function extractTweetInfo(result: any): any[] {
 async function executeRun(initialCadence: number): Promise<void> {
   console.log("Starting Twitter scraper client");
 
-  const processedResults: { [key: string]: JobResponse } = {};
+  const processedResults: { [key: string]: JobResponse & { jobType?: string } } = {};
 
   // Create different random queries for each worker
   console.log(
@@ -237,22 +245,26 @@ async function executeRun(initialCadence: number): Promise<void> {
   const jobPromises: Promise<JobResponse>[] = [];
   const workerQueries: { [key: string]: string } = {};
   const workerMaxResults: { [key: string]: number } = {};
+  const workerJobTypes: { [key: string]: string } = {};
 
-  // Assign a different random query to each worker
+  // Assign a different random query and job type to each worker
   for (const workerUrl of workerUrls) {
     const randomQuery = getRandomItem(twitterQueries);
     const randomMaxResults = getRandomItem(maxResultsList);
+    const randomJobType = getRandomItem(JOB_TYPES);
 
     workerQueries[workerUrl] = randomQuery;
     workerMaxResults[workerUrl] = randomMaxResults;
+    workerJobTypes[workerUrl] = randomJobType;
 
     console.log(`\nWorker: ${workerUrl}`);
-    if (jobType !== "hometweets") {
+    console.log(`Selected job type for this worker: "${randomJobType}"`);
+    if (randomJobType === "searchbyquery") {
       console.log(`Selected query for this worker: "${randomQuery}"`);
     }
     console.log(`Selected max results for this worker: ${randomMaxResults}`);
 
-    jobPromises.push(executeWorkerJob(workerUrl, randomQuery, randomMaxResults));
+    jobPromises.push(executeWorkerJob(workerUrl, randomQuery, randomMaxResults, randomJobType));
   }
 
   // Wait for all promises to settle (either resolve or reject)
@@ -262,13 +274,17 @@ async function executeRun(initialCadence: number): Promise<void> {
   // Process results
   results.forEach((result, index) => {
     const workerUrl = workerUrls[index];
+    const jobType = workerJobTypes[workerUrl];
 
     if (result.status === "fulfilled") {
-      processedResults[workerUrl] = result.value;
+      processedResults[workerUrl] = {
+        ...result.value,
+        jobType,
+      };
 
       // Log individual results
       if (result.value.success && result.value.result) {
-        console.log(`\n✅ Twitter search completed successfully for ${workerUrl}!`);
+        console.log(`\n✅ Twitter ${jobType} completed successfully for ${workerUrl}!`);
 
         // Diagnostic log to see the structure of the result
         console.log("\n🔍 DEBUG - Raw Result Structure:");
@@ -303,7 +319,7 @@ async function executeRun(initialCadence: number): Promise<void> {
         }
         console.log("---------------------------------------------");
       } else {
-        console.error(`\n❌ Twitter search failed for ${workerUrl}:`);
+        console.error(`\n❌ Twitter ${jobType} failed for ${workerUrl}:`);
         console.error(`Error: ${result.value.error || "Unknown error"}`);
       }
     } else {
@@ -311,12 +327,14 @@ async function executeRun(initialCadence: number): Promise<void> {
       processedResults[workerUrl] = {
         success: false,
         error: result.reason?.toString() || "Promise rejected",
+        jobType,
         metadata: {
-          ...(jobType !== "hometweets"
+          ...(jobType === "searchbyquery"
             ? { query: workerQueries[workerUrl] || "Unknown query" }
             : {}),
           maxResults: workerMaxResults[workerUrl] || 0,
           workerUrl,
+          jobType,
           timing: {
             executedAt: new Date().toISOString(),
           },
@@ -336,19 +354,29 @@ async function executeRun(initialCadence: number): Promise<void> {
  * Generate a report for the current run
  */
 function generateRunReport(
-  results: { [key: string]: JobResponse },
+  results: { [key: string]: JobResponse & { jobType?: string } },
   queryInfo: string,
   maxResultsInfo: number,
   cadence: number
 ): void {
   console.log("\n---------------------------------------------");
-  console.log(
-    `📊 REPORT: ${jobType === "hometweets" ? "Twitter Home Timeline" : "Twitter Search Results"}`
-  );
+  console.log(`📊 REPORT: Twitter Jobs Summary`);
 
-  // Only show query info for searchbyquery job type
-  if (jobType !== "hometweets") {
-    // If we used multiple queries, display that instead of a specific query
+  // Count job types
+  const jobTypeCounts: Record<string, number> = {};
+  for (const [_, result] of Object.entries(results)) {
+    const jobType = result.jobType || "unknown";
+    jobTypeCounts[jobType] = (jobTypeCounts[jobType] || 0) + 1;
+  }
+
+  // Display job type counts
+  console.log("Job Types Used:");
+  for (const [type, count] of Object.entries(jobTypeCounts)) {
+    console.log(`  - ${type}: ${count} worker(s)`);
+  }
+
+  // Only show query info if we have searchbyquery jobs
+  if (jobTypeCounts["searchbyquery"]) {
     if (queryInfo === "Multiple queries used") {
       console.log(`Queries: Multiple different queries were used`);
     } else {
@@ -363,7 +391,6 @@ function generateRunReport(
     console.log(`Max Results: ${maxResultsInfo}`);
   }
 
-  console.log(`Job Type: ${jobType}`);
   console.log(`Wait: ${cadence} seconds`);
   console.log("---------------------------------------------");
 
@@ -375,6 +402,7 @@ function generateRunReport(
 
   for (const [workerUrl, result] of Object.entries(results)) {
     const workerName = workerUrl.replace("https://", "");
+    const jobType = result.jobType || "unknown";
 
     if (result.success && result.result) {
       // Use the tweetCount from metadata if available, otherwise count manually
@@ -382,12 +410,12 @@ function generateRunReport(
       tweetsInThisRun += tweetCount;
       successCount++;
 
-      if (jobType === "hometweets") {
-        console.log(`✅ Worker ${workerName}: ${tweetCount} tweets`);
-      } else {
+      if (jobType === "searchbyquery") {
         console.log(
-          `✅ Worker ${workerName}: ${tweetCount} tweets (Query: "${result.metadata.query}")`
+          `✅ Worker ${workerName} (${jobType}): ${tweetCount} tweets (Query: "${result.metadata.query}")`
         );
+      } else {
+        console.log(`✅ Worker ${workerName} (${jobType}): ${tweetCount} tweets`);
       }
 
       // Extract tweet information
@@ -406,12 +434,14 @@ function generateRunReport(
         const jobId = result.metadata.jobStatus.jobId || "unknown";
         const responseTime = result.metadata.timing.responseTimeMs || 0;
 
-        console.log(`⏳ Worker ${workerName}: In progress - JobID: ${jobId}`);
+        console.log(`⏳ Worker ${workerName} (${jobType}): In progress - JobID: ${jobId}`);
         console.log(`   - Attempts: ${attempts}, Response time: ${responseTime}ms`);
         console.log(`   - Status: ${result.metadata.jobStatus.status || "No status available"}`);
       } else {
         failureCount++;
-        console.log(`❌ Worker ${workerName}: Failed - ${result.error || "Unknown error"}`);
+        console.log(
+          `❌ Worker ${workerName} (${jobType}): Failed - ${result.error || "Unknown error"}`
+        );
       }
     }
   }

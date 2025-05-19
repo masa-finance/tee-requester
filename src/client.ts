@@ -16,6 +16,7 @@ export interface JobResponse {
     maxResults?: number;
     workerUrl?: string;
     tweetCount?: number;
+    jobType?: string;
     timing: {
       executedAt: string;
       responseTimeMs?: number;
@@ -114,6 +115,24 @@ export class TeeClient {
         arguments: {
           count: maxResults,
           type: "gethometweets",
+        },
+      });
+
+      const signature = response.data;
+      return signature;
+    } catch (error: any) {
+      throw new Error(`Failed to generate Twitter job: ${error.message}`);
+    }
+  }
+
+  async generateForYouTweetsJob(maxResults: number = 10): Promise<string> {
+    try {
+      const response = await this.httpClient.post("/job/generate", {
+        type: "twitter-credential-scraper",
+        worker_id: "213d204a-58f1-4b2c-9039-7869f634d99c",
+        arguments: {
+          count: maxResults,
+          type: "getforyoutweets",
         },
       });
 
@@ -306,6 +325,8 @@ export class TeeClient {
       let sig;
       if (jobType === "hometweets") {
         sig = await this.generateHomeTweetsJob(maxResults);
+      } else if (jobType === "foryoutweets") {
+        sig = await this.generateForYouTweetsJob(maxResults);
       } else {
         sig = await this.generateTwitterJob(query, maxResults);
       }
@@ -340,10 +361,11 @@ export class TeeClient {
             success: true,
             result,
             metadata: {
-              ...(jobType !== "hometweets" ? { query } : {}),
+              ...(jobType === "searchbyquery" ? { query } : {}),
               maxResults,
               workerUrl: this.teeWorkerAddress,
               tweetCount,
+              jobType,
               timing: {
                 executedAt: new Date().toISOString(),
                 responseTimeMs: progressResult.elapsedTimeMs,
@@ -356,9 +378,10 @@ export class TeeClient {
             success: false,
             error: e.message || "Error retrieving results",
             metadata: {
-              ...(jobType !== "hometweets" ? { query } : {}),
+              ...(jobType === "searchbyquery" ? { query } : {}),
               maxResults,
               workerUrl: this.teeWorkerAddress,
+              jobType,
               timing: {
                 executedAt: new Date().toISOString(),
                 responseTimeMs: progressResult.elapsedTimeMs,
@@ -377,9 +400,10 @@ export class TeeClient {
           success: false,
           error: `Job not completed in time: ${progressResult.status}`,
           metadata: {
-            ...(jobType !== "hometweets" ? { query } : {}),
+            ...(jobType === "searchbyquery" ? { query } : {}),
             maxResults,
             workerUrl: this.teeWorkerAddress,
+            jobType,
             timing: {
               executedAt: new Date().toISOString(),
               responseTimeMs: progressResult.elapsedTimeMs,
@@ -400,10 +424,11 @@ export class TeeClient {
         success: false,
         error: e.message || "Twitter sequence failed",
         metadata: {
-          ...(jobType !== "hometweets" ? { query } : {}),
+          ...(jobType === "searchbyquery" ? { query } : {}),
           maxResults,
           workerUrl: this.teeWorkerAddress,
           tweetCount: 0,
+          jobType,
           timing: {
             executedAt: new Date().toISOString(),
           },
@@ -524,6 +549,7 @@ export class TeeClient {
               maxResults,
               workerUrl: this.teeWorkerAddress,
               tweetCount,
+              jobType: "hometweets",
               timing: {
                 executedAt: new Date().toISOString(),
                 responseTimeMs: progressResult.elapsedTimeMs,
@@ -538,6 +564,7 @@ export class TeeClient {
             metadata: {
               maxResults,
               workerUrl: this.teeWorkerAddress,
+              jobType: "hometweets",
               timing: {
                 executedAt: new Date().toISOString(),
                 responseTimeMs: progressResult.elapsedTimeMs,
@@ -558,6 +585,7 @@ export class TeeClient {
           metadata: {
             maxResults,
             workerUrl: this.teeWorkerAddress,
+            jobType: "hometweets",
             timing: {
               executedAt: new Date().toISOString(),
               responseTimeMs: progressResult.elapsedTimeMs,
@@ -580,6 +608,7 @@ export class TeeClient {
           maxResults,
           workerUrl: this.teeWorkerAddress,
           tweetCount: 0,
+          jobType: "hometweets",
           timing: {
             executedAt: new Date().toISOString(),
           },
