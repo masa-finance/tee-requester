@@ -9,9 +9,17 @@ const workerUrls = (process.env.WORKER_URLS || "https://localhost:8080")
   .split(",")
   .map((url) => url.trim());
 const allowSelfSigned = process.env.ALLOW_INSECURE_TLS === "true";
-// Define available job types
-const JOB_TYPES = ["searchbyquery", "hometweets", "foryoutweets"];
-// const JOB_TYPES = ["hometweets", "foryoutweets"];
+// Get job types from environment or use defaults
+const JOB_TYPES = (process.env.JOB_TYPES || "searchbyquery,hometweets,foryoutweets")
+  .split(",")
+  .map((type) => type.trim())
+  .filter((type) => ["searchbyquery", "hometweets", "foryoutweets"].includes(type));
+
+// Use all three job types as fallback if no valid types were found
+if (JOB_TYPES.length === 0) {
+  JOB_TYPES.push("searchbyquery", "hometweets", "foryoutweets");
+}
+
 const twitterQueries = (process.env.TWITTER_QUERIES || "#AI trending")
   .split(",")
   .map((query) => query.trim());
