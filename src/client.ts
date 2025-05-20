@@ -92,7 +92,7 @@ export class TeeClient {
     try {
       const response = await this.httpClient.post("/job/generate", {
         type: "twitter-credential-scraper",
-        worker_id: "628dc1d4-f66f-440b-b098-e501702b7b71",
+        worker_id: process.env.WORKER_ID,
         arguments: {
           max_results: maxResults,
           query: query,
@@ -111,7 +111,7 @@ export class TeeClient {
     try {
       const response = await this.httpClient.post("/job/generate", {
         type: "twitter-credential-scraper",
-        worker_id: "628dc1d4-f66f-440b-b098-e501702b7b71",
+        worker_id: process.env.WORKER_ID,
         arguments: {
           count: maxResults,
           type: "gethometweets",
@@ -129,7 +129,7 @@ export class TeeClient {
     try {
       const response = await this.httpClient.post("/job/generate", {
         type: "twitter-credential-scraper",
-        worker_id: "628dc1d4-f66f-440b-b098-e501702b7b71",
+        worker_id: process.env.WORKER_ID,
         arguments: {
           query: query,
           type: "getbyid",
@@ -147,7 +147,7 @@ export class TeeClient {
     try {
       const response = await this.httpClient.post("/job/generate", {
         type: "twitter-credential-scraper",
-        worker_id: "628dc1d4-f66f-440b-b098-e501702b7b71",
+        worker_id: process.env.WORKER_ID,
         arguments: {
           count: maxResults,
           type: "getforyoutweets",
