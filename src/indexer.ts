@@ -12,9 +12,7 @@ const DEFAULT_MAX_RESULTS = parseInt(process.env.DEFAULT_MAX_RESULTS!, 10);
 
 // Hardcoded configuration
 const POLL_INTERVAL_MS = 5000; // 5 seconds
-const MAX_WAIT_TIME_MS = 300000; // 5 minutes
 const DELAY_BETWEEN_JOBS = 5000; // 5 seconds
-const MAX_CONSECUTIVE_IN_PROGRESS = 10;
 
 interface MasaJobRequest {
   type: string;
@@ -145,22 +143,15 @@ export class MasaIndexer {
   }
 
   /**
-   * Poll job until complete (max 10 "in progress" attempts)
+   * Poll job until complete (max 5 attempts)
    */
   async pollJobUntilComplete(jobUuid: string): Promise<MasaResultResponse | null> {
-    const startTime = Date.now();
-    let attempts = 0;
-    let consecutiveInProgressCount = 0;
+    const maxAttempts = 5;
 
-    console.log(
-      `⏳ Polling job ${jobUuid} (max ${MAX_CONSECUTIVE_IN_PROGRESS} "in progress" attempts)`
-    );
+    console.log(`⏳ Polling job ${jobUuid} (max ${maxAttempts} attempts)`);
 
-    while (Date.now() - startTime < MAX_WAIT_TIME_MS) {
-      attempts++;
-      const elapsedTime = Math.round((Date.now() - startTime) / 1000);
-
-      console.log(`🔄 Poll attempt #${attempts} (${elapsedTime}s elapsed)`);
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      console.log(`🔄 Poll attempt #${attempt}/${maxAttempts}`);
 
       try {
         const result = await this.getJobResult(jobUuid);
@@ -169,26 +160,20 @@ export class MasaIndexer {
           console.log(`✅ Job completed! Got data.`);
           return result;
         } else {
-          consecutiveInProgressCount++;
-          console.log(
-            `   📄 "in progress" response (${consecutiveInProgressCount}/${MAX_CONSECUTIVE_IN_PROGRESS})`
-          );
+          console.log(`   📄 "in progress" response`);
 
-          if (consecutiveInProgressCount >= MAX_CONSECUTIVE_IN_PROGRESS) {
-            console.log(`💀 Giving up after ${MAX_CONSECUTIVE_IN_PROGRESS} "in progress" attempts`);
-            return null;
+          if (attempt < maxAttempts) {
+            await this.sleep(POLL_INTERVAL_MS);
           }
-
-          await this.sleep(POLL_INTERVAL_MS);
           continue;
         }
       } catch (error: any) {
-        consecutiveInProgressCount = 0; // Reset on error
-
         // Continue polling for expected "not ready" errors
         if (error.response?.status === 404 || error.response?.status === 202) {
           console.log(`   🔄 Job not ready yet, continuing...`);
-          await this.sleep(POLL_INTERVAL_MS);
+          if (attempt < maxAttempts) {
+            await this.sleep(POLL_INTERVAL_MS);
+          }
           continue;
         }
 
@@ -201,7 +186,9 @@ export class MasaIndexer {
               errorMessage.includes("not ready yet")
             ) {
               console.log(`   🔄 Still processing, continuing...`);
-              await this.sleep(POLL_INTERVAL_MS);
+              if (attempt < maxAttempts) {
+                await this.sleep(POLL_INTERVAL_MS);
+              }
               continue;
             }
           }
@@ -212,7 +199,7 @@ export class MasaIndexer {
       }
     }
 
-    console.error(`⏰ Timeout after ${Math.round((Date.now() - startTime) / 1000)}s`);
+    console.error(`💀 Giving up after ${maxAttempts} attempts`);
     return null;
   }
 
